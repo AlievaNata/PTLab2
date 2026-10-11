@@ -1,0 +1,65 @@
+name: Tests
+
+on:
+  push:
+  pull_request:
+    branches: [master, main]
+  workflow_dispatch:
+
+concurrency:
+  group: tests-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    name: Модульные тесты (PostgreSQL)
+    runs-on: ubuntu-latest
+
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: django_db
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    env:
+      # tplab2/settings.py берёт пароль пользователя postgres из этой переменной
+      DATABASE_PASSWORD: postgres
+
+    steps:
+      - name: Получение кода
+        uses: actions/checkout@v6
+
+      - name: Установка Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+          cache: pip
+
+      - name: Системная библиотека для psycopg2
+        run: sudo apt-get update && sudo apt-get install -y libpq-dev
+
+      - name: Установка зависимостей
+        run: pip install -r requirements.txt coverage
+
+      - name: Проверка конфигурации Django
+        run: python manage.py check
+
+      - name: Запуск тестов с замером покрытия
+        run: >
+          coverage run --source=shop --omit="*/migrations/*,*/tests/*"
+          manage.py test shop/tests/ --verbosity 2
+
+      - name: Отчёт о покрытии
+        if: always()
+        run: |
+          coverage report --show-missing
+          echo "### Покрытие кода тестами" >> "$GITHUB_STEP_SUMMARY"
+          coverage report --format=markdown >> "$GITHUB_STEP_SUMMARY" || true
